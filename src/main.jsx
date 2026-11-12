@@ -1,0 +1,70 @@
+import React, { useEffect, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import './style.css';
+import AttendeesDialog from './AttendeesDialog.jsx';
+import Calendar from './Calendar.jsx';
+
+async function api(url, options = {}) {
+  const response = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...options });
+  const data = await response.json();
+  if (!response.ok) { const error = new Error(data.error || 'Ocorreu um erro. Tente novamente.'); error.status = response.status; throw error; }
+  return data;
+}
+
+function eventDate(value) {
+  const date = new Date(value.length === 10 ? `${value}T12:00:00` : value);
+  return Number.isNaN(date.valueOf()) ? null : date;
+}
+
+function Login({ onLogin, initialError = '' }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState(initialError);
+  const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  async function submit(e) {
+    e.preventDefault(); setError('');
+    if (!email.trim() || !password) { setError('Informe seu e-mail e sua senha.'); return; }
+    setBusy(true);
+    try { const user = await api('/api/login', { method: 'POST', body: JSON.stringify({ email, password }) }); onLogin(user); }
+    catch (err) { setError(err.message); setPassword(''); }
+    finally { setBusy(false); }
+  }
+  return <div className="login"><aside className="login-art"><Brand /><div><div className="eyebrow">Sua próxima descoberta</div><h1>Boas ideias começam em bons encontros.</h1><p>Encontre eventos de tecnologia e organize tudo o que você não quer perder.</p></div><div className="eyebrow">Sua agenda de tecnologia</div></aside><main className="login-main"><div className="login-box"><div className="tagline">Bem-vindo de volta</div><h2>Entre na sua conta</h2><p className="sub">Seus eventos favoritos estão esperando por você.</p><form onSubmit={submit} noValidate><label className="field">E-mail<input className="control" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} /></label><label className="field">Senha<input className="control" type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></label><button type="button" className="password-toggle" onClick={() => setShowPassword(!showPassword)}>{showPassword ? 'Ocultar senha' : 'Mostrar senha'}</button><div className="error" role="alert">{error}</div><button className="primary wide" disabled={busy}>{busy ? 'Entrando…' : 'Entrar →'}</button></form></div></main></div>;
+}
+
+function Brand() { return <div className="brand"><span className="logo">✳</span> DFL events</div>; }
+
+function EventCard({ event, onSave, onRemove, onStatus, onSend, saving }) {
+  const date = eventDate(event.start);
+  return <article className="event"><div className="date"><strong>{date ? date.toLocaleDateString('pt-BR', { day: '2-digit' }) : '—'}</strong>{date ? date.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '') : '—'}</div><div><h3>{event.title}</h3><div className="meta"><span>◷ {date ? date.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Data não informada'}</span><span>◎ {event.mode || 'Não informado'}</span><span>↗ {event.source}</span></div>{Boolean(event.saved) && event.attendees?.length > 0 && <div className="event-attendees"><strong>Participantes</strong>{event.attendees.map(person => <div className="person-row" key={person.email}><span>{person.name} <span className="person-email">{person.email}</span><small>{person.delivery === 'sent' ? 'Convite enviado' : person.delivery === 'failed' ? 'Falha no envio' : 'Envio não configurado'}</small></span><label><span className="sr">Resposta de {person.name}</span><select className="control status-select" value={person.status || 'pending'} disabled={saving} onChange={e => onStatus(event, person, e.target.value)}><option value="pending">Aguardando</option><option value="confirmed">Confirmou</option><option value="declined">Não vai</option></select></label>{person.delivery !== 'sent' && <button className="ghost send-invite" disabled={saving} onClick={() => onSend(event, person)}>Enviar convite</button>}</div>)}</div>}</div><div className="event-actions"><a href={event.url} target="_blank" rel="noopener noreferrer">Ver evento ↗</a><button className={`secondary ${event.saved ? 'saved' : ''}`} disabled={saving} onClick={() => onSave(event)}>{event.saved ? '✓ Pessoas' : '+ Marcar inscrito'}</button>{Boolean(event.saved) && <button className="ghost remove-event" disabled={saving} onClick={() => onRemove(event)}>Remover</button>}</div></article>;
+}
+
+function Agenda({ user, onLogout, onSessionExpired }) {
+  const [events, setEvents] = useState([]), [page, setPage] = useState('events');
+  const [month, setMonth] = useState(() => { const date = new Date(); return new Date(date.getFullYear(), date.getMonth(), 1); });
+  const [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [loading, setLoading] = useState(true), [loadError, setLoadError] = useState(''), [saving, setSaving] = useState(null);
+  const [search, setSearch] = useState(''), [source, setSource] = useState('all'), [mode, setMode] = useState('all');
+  const [selectedEvent, setSelectedEvent] = useState(null), [toast, setToast] = useState('');
+  useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 5000); return () => clearTimeout(timer); }, [toast]);
+  async function load() { try { setLoadError(''); setEvents(await api('/api/events')); } catch (err) { if (err.status === 401) onSessionExpired(); else setLoadError(err.message); } finally { setLoading(false); } }
+  useEffect(() => { load(); }, []);
+  async function refresh() { setBusy(true); setNotice('Consultando as fontes. Isso pode levar alguns segundos.'); try { const status = await api('/api/refresh', { method: 'POST' }); setEvents(await api('/api/events')); setNotice(status.map(s => `${s.source}: ${s.count} eventos${s.message && s.message !== 'Dados encontrados' ? ` (${s.message})` : ''}`).join(' · ')); } catch (err) { if (err.status === 401) onSessionExpired(); else setNotice(err.message); } finally { setBusy(false); } }
+  async function save(event, attendees) { setSaving(event.id); try { const result = await api('/api/saved', { method: 'POST', body: JSON.stringify({ id: event.id, saved: true, attendees }) }); setEvents(old => old.map(item => item.id === event.id ? { ...item, saved: true, attendees: result.attendees } : item)); setSelectedEvent(null); setNotice(''); setToast(event.saved ? 'Pessoas atualizadas no calendário.' : 'Evento adicionado ao calendário!'); return ''; } catch (err) { if (err.status === 401) { onSessionExpired(); return ''; } return err.message; } finally { setSaving(null); } }
+  async function remove(event) { setSaving(event.id); try { await api('/api/saved', { method: 'POST', body: JSON.stringify({ id: event.id, saved: false }) }); setEvents(old => old.map(item => item.id === event.id ? { ...item, saved: false, attendees: [] } : item)); setToast('Evento removido do calendário.'); } catch (err) { if (err.status === 401) onSessionExpired(); else setNotice(err.message); } finally { setSaving(null); } }
+  async function updateStatus(event, person, status) { setSaving(event.id); try { await api('/api/invitations/status', { method: 'POST', body: JSON.stringify({ id: event.id, email: person.email, status }) }); await load(); setToast('Resposta atualizada.'); } catch (err) { if (err.status === 401) onSessionExpired(); else setNotice(err.message); } finally { setSaving(null); } }
+  async function sendInvite(event, person) { setSaving(event.id); try { await api('/api/invitations/send', { method: 'POST', body: JSON.stringify({ id: event.id, email: person.email }) }); await load(); setToast('Convite enviado.'); } catch (err) { if (err.status === 401) onSessionExpired(); else setNotice(err.message); } finally { setSaving(null); } }
+  async function logout() { try { await api('/api/logout', { method: 'POST' }); onLogout(); } catch (err) { if (err.status === 401) onLogout(); else setNotice(err.message); } }
+  const filtered = events.filter(event => { const date = eventDate(event.start); return date && date.getFullYear() === month.getFullYear() && date.getMonth() === month.getMonth() && (page === 'events' || event.saved) && (page !== 'events' || ((source === 'all' || event.source === source) && (mode === 'all' || (mode === 'online' ? event.mode === 'Online' : event.mode !== 'Online')) && event.title.toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR')))); });
+  return <div className="shell"><aside className="sidebar"><Brand /><div><div className="nav-label">MENU PRINCIPAL</div><nav className="nav" aria-label="Navegação principal"><button className={page === 'events' ? 'active' : ''} onClick={() => { setPage('events'); setNotice(''); }}><span className="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 7h16v12H4zM4 10h16M8 4v5M16 4v5M8 14h3m-3 3h5"/></svg></span> Eventos</button><button className={page === 'calendar' ? 'active' : ''} onClick={() => { setPage('calendar'); setNotice(''); }}><span className="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3.5" y="5.5" width="17" height="15" rx="2"/><path d="M7.5 3v5M16.5 3v5M3.5 10h17M8 14h2m4 0h2m-8 3h2m4 0h2"/></svg></span> Calendário</button></nav></div><div className="side-bottom">Conectado como<br />{user.email}<button className="logout" onClick={logout}>Sair →</button></div></aside><main className="main"><header className="header"><div><div className="tagline">{page === 'events' ? 'Explore e descubra' : 'Seus compromissos'}</div><h1>{page === 'events' ? 'Eventos para você' : 'Meu calendário'}</h1><p>{page === 'events' ? 'Encontre seu próximo evento de tecnologia.' : 'Os eventos que você marcou como inscrito, em um só lugar.'}</p></div>{page === 'events' && <button className="primary" onClick={refresh} disabled={busy}>{busy ? 'Atualizando…' : '↻ Atualizar eventos'}</button>}</header><div className="toolbar">{page === 'events' && <><label className="sr" htmlFor="search">Buscar eventos</label><input id="search" className="control" placeholder="⌕  Buscar por assunto ou evento" value={search} onChange={e => setSearch(e.target.value)} />{search && <button className="secondary" onClick={() => setSearch('')} aria-label="Limpar busca">×</button>}<label className="sr" htmlFor="source">Plataforma</label><select id="source" className="control" value={source} onChange={e => setSource(e.target.value)}><option value="all">Todas as plataformas</option>{[...new Set(events.map(event => event.source))].sort().map(s => <option key={s}>{s}</option>)}</select><label className="sr" htmlFor="mode">Modalidade</label><select id="mode" className="control" value={mode} onChange={e => setMode(e.target.value)}><option value="all">Todas as modalidades</option><option value="online">Online</option><option value="other">Outras / não informado</option></select></>}<div className="monthnav"><button className="secondary" aria-label="Mês anterior" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}>‹</button><strong>{month.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</strong><button className="secondary" aria-label="Próximo mês" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}>›</button></div></div>{notice && <div className="notice" role="status">{notice}</div>}{loading ? <div className="empty" role="status">Carregando eventos…</div> : loadError ? <div className="empty" role="alert"><strong>Não foi possível carregar os eventos.</strong>{loadError}<br /><button className="secondary" onClick={() => { setLoading(true); load(); }}>Tentar novamente</button></div> : page === 'calendar' ? <Calendar month={month} events={filtered} eventDate={eventDate} renderEvent={event => <EventCard key={event.id} event={event} onSave={setSelectedEvent} onRemove={remove} onStatus={updateStatus} onSend={sendInvite} saving={saving === event.id} />} /> : <><div className="result">{filtered.length} {filtered.length === 1 ? 'evento encontrado' : 'eventos encontrados'}</div><section className="event-list" aria-label="Lista de eventos">{filtered.length ? filtered.map(event => <EventCard key={event.id} event={event} onSave={setSelectedEvent} onRemove={remove} onStatus={updateStatus} onSend={sendInvite} saving={saving === event.id} />) : <div className="empty"><strong>Nenhum evento encontrado</strong>Atualize as fontes ou experimente outro mês ou filtro.</div>}</section></>}</main>{selectedEvent && <AttendeesDialog event={selectedEvent} saving={saving === selectedEvent.id} onClose={() => setSelectedEvent(null)} onConfirm={save} />}{toast && <div className="toast-success" role="status"><span aria-hidden="true">✓</span><span>{toast}</span><button type="button" aria-label="Fechar aviso" onClick={() => setToast('')}>×</button></div>}</div>;
+}
+
+function App() {
+  const [state, setState] = useState({ loading: true, user: null, error: '' });
+  useEffect(() => { api('/api/me').then(user => setState({ loading: false, user, error: '' })).catch(err => setState({ loading: false, user: null, error: err.status === 401 ? '' : 'Não foi possível conectar ao servidor. Verifique se ele está iniciado.' })); }, []);
+  if (state.loading) return <main className="loading">Carregando sua agenda…</main>;
+  if (!state.user) return <Login initialError={state.error} onLogin={user => setState({ loading: false, user, error: '' })} />;
+  return <Agenda user={state.user} onLogout={() => setState({ loading: false, user: null, error: '' })} onSessionExpired={() => setState({ loading: false, user: null, error: 'Sua sessão terminou. Entre novamente.' })} />;
+}
+
+createRoot(document.getElementById('root')).render(<App />);
