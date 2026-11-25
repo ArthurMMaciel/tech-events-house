@@ -1,25 +1,24 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { AnimatePresence, MotionConfig, motion } from 'motion/react';
+import { ArrowRight, CalendarHeart, ChevronLeft, ChevronRight, CircleCheck, Compass, Earth, Eye, EyeOff, Lock, LogOut, Mail, Plus, RefreshCw, Sparkles, X } from 'lucide-react';
 import './style.css';
 import AttendeesDialog from './AttendeesDialog.jsx';
 import EventFormDialog from './EventFormDialog.jsx';
 import PublicEvent from './PublicEvent.jsx';
 import Calendar from './Calendar.jsx';
+import EventCard, { eventDate } from './EventCard.jsx';
+import Explore from './Explore.jsx';
+import Brand, { Backdrop } from './Brand.jsx';
 import { supabase, configured } from './supabase.js';
-import { addToAgenda, createEvent, currentMember, inviteMailto, loadMonth, publicLink, removeFromAgenda, saveCollected, saveParticipants, setParticipantStatus } from './data.js';
+import { addToAgenda, createEvent, currentMember, loadAgendaMonth, loadUpcoming, publicLink, removeFromAgenda, saveCollected, saveParticipants, setEventPrice, setParticipantStatus } from './data.js';
 import { collectOpenSources } from './sources.js';
+import { isBrazil } from './geo.js';
 
-function eventDate(value) {
-  const date = new Date(value.length === 10 ? `${value}T12:00:00` : value);
-  return Number.isNaN(date.valueOf()) ? null : date;
-}
 
 function Login({ initialError = '' }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState(initialError);
-  const [busy, setBusy] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState(''), [password, setPassword] = useState('');
+  const [error, setError] = useState(initialError), [busy, setBusy] = useState(false), [showPassword, setShowPassword] = useState(false);
   useEffect(() => setError(initialError), [initialError]);
   async function submit(e) {
     e.preventDefault(); setError('');
@@ -29,63 +28,148 @@ function Login({ initialError = '' }) {
     setBusy(false);
     if (error) { setError(error.status === 400 ? 'E-mail ou senha incorretos.' : error.status === 429 ? 'Muitas tentativas. Tente novamente mais tarde.' : 'Não foi possível entrar. Tente novamente.'); setPassword(''); }
   }
-  return <div className="login"><aside className="login-art"><Brand /><div><div className="eyebrow">Sua próxima descoberta</div><h1>Boas ideias começam em bons encontros.</h1><p>Encontre eventos de tecnologia e organize a agenda da casa.</p></div><div className="eyebrow">Agenda compartilhada</div></aside><main className="login-main"><div className="login-box"><div className="tagline">Bem-vindo de volta</div><h2>Entre na sua conta</h2><p className="sub">Seus eventos favoritos estão esperando por você.</p><form onSubmit={submit} noValidate><label className="field">E-mail<input className="control" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} /></label><label className="field">Senha<input className="control" type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></label><button type="button" className="password-toggle" onClick={() => setShowPassword(!showPassword)}>{showPassword ? 'Ocultar senha' : 'Mostrar senha'}</button><div className="error" role="alert">{error}</div><button className="primary wide" disabled={busy}>{busy ? 'Entrando…' : 'Entrar →'}</button></form></div></main></div>;
+  return <div className="login"><Backdrop />
+    <motion.aside className="login-art" initial={{ opacity: 0, x: -24 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: .6 }}>
+      <Brand />
+      <div><div className="eyebrow">Agenda compartilhada</div><h1>Boas ideias começam em <span className="gradient-text">bons encontros.</span></h1><p>Eventos de tecnologia do Brasil e do mundo, numa agenda só da casa.</p>
+        <ul className="login-points"><li><Compass size={16} />Descubra eventos por país, estado e cidade</li><li><CalendarHeart size={16} />Monte a agenda junto com o sócio</li><li><Mail size={16} />Convide pessoas com um link de inscrição</li></ul></div>
+      <div className="eyebrow muted">DFL events · {new Date().getFullYear()}</div>
+    </motion.aside>
+    <main className="login-main"><motion.div className="login-box card-surface" initial={{ opacity: 0, y: 24, scale: .98 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: .5, delay: .1 }}>
+      <div className="eyebrow">Bem-vindo de volta</div><h2>Entre na sua conta</h2><p className="sub">Seus eventos estão esperando por você.</p>
+      <form onSubmit={submit} noValidate>
+        <label className="field">E-mail<span className="input-icon"><Mail size={17} /><input className="control" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} /></span></label>
+        <label className="field">Senha<span className="input-icon"><Lock size={17} /><input className="control" type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /><button type="button" className="icon-btn small" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></span></label>
+        <div className="error" role="alert">{error}</div>
+        <button className="btn btn-primary wide" disabled={busy}>{busy ? <RefreshCw size={17} className="spin" /> : null}{busy ? 'Entrando…' : <>Entrar <ArrowRight size={17} /></>}</button>
+      </form>
+    </motion.div></main>
+  </div>;
 }
 
-function Brand() { return <div className="brand"><span className="logo">✳</span> DFL events</div>; }
-
-const statusLabel = { invited: 'Convidado', confirmed: 'Confirmou', declined: 'Não vai' };
-
-function EventCard({ event, onSave, onPeople, onRemove, onStatus, onCopy, saving }) {
-  const date = eventDate(event.start);
-  const emails = event.attendees.filter(p => p.status === 'invited').map(p => p.email);
-  const confirmed = event.attendees.filter(p => p.status === 'confirmed').length;
-  return <article className="event"><div className="date"><strong>{date ? date.toLocaleDateString('pt-BR', { day: '2-digit' }) : '—'}</strong>{date ? date.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '') : '—'}</div><div>
-    <h3>{event.title}</h3>
-    <div className="meta"><span>◷ {date ? date.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Data não informada'}</span><span>◎ {[event.mode, event.location].filter(Boolean).join(' · ') || 'Não informado'}</span><span>↗ {event.source}</span>{event.saved && <span>✓ {confirmed} {confirmed === 1 ? 'confirmado' : 'confirmados'}</span>}</div>
-    {event.saved && <div className="event-share"><span className="share-label">Link de inscrição</span><code>{publicLink(event.publicToken)}</code><button className="ghost" onClick={() => onCopy(event)}>Copiar</button>{emails.length > 0 && <a className="ghost-link" href={inviteMailto(event, emails)}>Convidar por e-mail ({emails.length})</a>}</div>}
-    {event.saved && event.attendees.length > 0 && <div className="event-attendees"><strong>Participantes</strong>{event.attendees.map(person => <div className="person-row" key={person.id}><span>{person.name} <span className="person-email">{person.email}</span><small>{person.origin === 'public' ? 'Inscreveu-se pelo link' : 'Adicionado pela casa'}</small></span><label><span className="sr">Resposta de {person.name}</span><select className="control status-select" value={person.status} disabled={saving} onChange={e => onStatus(person, e.target.value)}>{Object.entries(statusLabel).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>{person.status === 'invited' && <a className="ghost-link send-invite" href={inviteMailto(event, [person.email])}>Enviar convite</a>}</div>)}</div>}
-  </div><div className="event-actions">{event.url && <a href={event.url} target="_blank" rel="noopener noreferrer">Ver evento ↗</a>}{event.saved ? <><button className="secondary saved" disabled={saving} onClick={() => onPeople(event)}>✓ Pessoas</button><button className="ghost remove-event" disabled={saving} onClick={() => onRemove(event)}>Remover</button></> : <button className="secondary" disabled={saving} onClick={() => onSave(event)}>+ Vamos nesse</button>}</div></article>;
+function useCountUp(value) {
+  const [shown, setShown] = useState(value), from = useRef(value);
+  useEffect(() => {
+    const start = performance.now(), a = from.current, b = value; let raf;
+    const tick = now => { const t = Math.min(1, (now - start) / 700), k = 1 - Math.pow(1 - t, 3); setShown(Math.round(a + (b - a) * k)); if (t < 1) raf = requestAnimationFrame(tick); else from.current = b; };
+    raf = requestAnimationFrame(tick); return () => cancelAnimationFrame(raf);
+  }, [value]);
+  return shown;
 }
+
+function Stat({ icon, label, value, tone, delay }) {
+  const n = useCountUp(value);
+  return <motion.div className={`stat tone-${tone}`} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay, duration: .4 }}>
+    <span className="stat-icon">{icon}</span><div><strong>{n}</strong><span>{label}</span></div>
+  </motion.div>;
+}
+
+function Skeleton() { return <div className="event-list">{[0, 1, 2, 3].map(i => <div key={i} className="event skeleton"><div className="sk sk-tile" /><div className="sk-lines"><div className="sk sk-line w40" /><div className="sk sk-line w70" /><div className="sk sk-line w55" /></div></div>)}</div>; }
 
 function Agenda({ member, onLogout, onSessionExpired }) {
-  const [events, setEvents] = useState([]), [page, setPage] = useState('events');
-  const [month, setMonth] = useState(() => { const date = new Date(); return new Date(date.getFullYear(), date.getMonth(), 1); });
-  const [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [loading, setLoading] = useState(true), [loadError, setLoadError] = useState(''), [saving, setSaving] = useState(null);
-  const [search, setSearch] = useState(''), [source, setSource] = useState('all'), [mode, setMode] = useState('all');
+  const [page, setPage] = useState(() => { try { return localStorage.getItem('dfl-page') || 'events'; } catch { return 'events'; } });
+  const [upcoming, setUpcoming] = useState([]), [agendaMonth, setAgendaMonth] = useState([]);
+  const [month, setMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+  const [notice, setNotice] = useState(null), [busy, setBusy] = useState(false), [loading, setLoading] = useState(true), [loadError, setLoadError] = useState(''), [saving, setSaving] = useState(null);
   const [selectedEvent, setSelectedEvent] = useState(null), [creating, setCreating] = useState(false), [toast, setToast] = useState('');
-  useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 5000); return () => clearTimeout(timer); }, [toast]);
-  const handle = err => { if (err.status === 401) onSessionExpired(); else setNotice(err.message); };
-  async function load() { try { setLoadError(''); setEvents(await loadMonth(month)); } catch (err) { if (err.status === 401) onSessionExpired(); else setLoadError(err.message); } finally { setLoading(false); } }
-  useEffect(() => { setLoading(true); load(); }, [month]);
-  async function refresh() {
-    setBusy(true); setNotice('Consultando as fontes. Isso pode levar alguns segundos.');
-    try { const { events: found, status } = await collectOpenSources(); await saveCollected(found); await load(); setNotice(status.map(s => `${s.source}: ${s.count} eventos${s.message !== 'Dados encontrados' ? ` (${s.message})` : ''}`).join(' · ')); }
-    catch (err) { handle(err); } finally { setBusy(false); }
+  useEffect(() => { try { localStorage.setItem('dfl-page', page); } catch {} }, [page]);
+  useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 4500); return () => clearTimeout(timer); }, [toast]);
+  const expired = err => { if (err.status === 401) { onSessionExpired(); return true; } return false; };
+
+  async function load() {
+    try { setLoadError(''); const [u, m] = await Promise.all([loadUpcoming(), loadAgendaMonth(month)]); setUpcoming(u); setAgendaMonth(m); }
+    catch (err) { if (!expired(err)) setLoadError(err.message); } finally { setLoading(false); }
   }
-  async function run(id, action, message) { setSaving(id); try { await action(); await load(); if (message) setToast(message); return ''; } catch (err) { if (err.status === 401) { onSessionExpired(); return ''; } setNotice(err.message); return err.message; } finally { setSaving(null); } }
-  const addEvent = event => run(event.id, () => addToAgenda(event.id), 'Evento adicionado à agenda! O link de inscrição já está disponível.');
+  useEffect(() => { load(); }, [month]);
+
+  async function refresh() {
+    setBusy(true); setNotice({ tone: 'info', text: 'Consultando as fontes. Isso leva alguns segundos…' });
+    try { const { events: found, status } = await collectOpenSources(); await saveCollected(found); await load(); setNotice({ tone: 'ok', items: status }); }
+    catch (err) { if (!expired(err)) setNotice({ tone: 'error', text: err.message }); } finally { setBusy(false); }
+  }
+  async function run(id, action, message) {
+    setSaving(id);
+    try { await action(); await load(); if (message) setToast(message); return ''; }
+    catch (err) { if (expired(err)) return ''; setNotice({ tone: 'error', text: err.message }); return err.message; }
+    finally { setSaving(null); }
+  }
+  const addEvent = event => run(event.id, () => addToAgenda(event.id), 'Evento na agenda! O link de inscrição já está disponível.');
   const remove = event => { if (window.confirm(`Remover "${event.title}" da agenda? A lista de participantes deste evento será apagada.`)) run(event.id, () => removeFromAgenda(event.id), 'Evento removido da agenda.'); };
   const updateStatus = (person, status) => run(person.id, () => setParticipantStatus(person.id, status), 'Resposta atualizada.');
+  const updatePrice = (event, price) => run(event.id, () => setEventPrice(event.id, price), 'Preço atualizado.');
   async function savePeople(event, people) { const error = await run(event.id, () => saveParticipants(event.id, people, event.attendees), 'Pessoas atualizadas.'); if (!error) setSelectedEvent(null); return error; }
   async function create(data) {
     setSaving('new');
-    try { await createEvent(data); const start = eventDate(data.start_date); setCreating(false); setPage('calendar'); setMonth(new Date(start.getFullYear(), start.getMonth(), 1)); await load(); setToast('Evento criado na agenda! Copie o link de inscrição no cartão.'); return ''; }
-    catch (err) { if (err.status === 401) { onSessionExpired(); return ''; } return err.message; } finally { setSaving(null); }
+    try { await createEvent(data); const start = eventDate(data.start_date); setCreating(false); setPage('calendar'); setMonth(new Date(start.getFullYear(), start.getMonth(), 1)); await load(); setToast('Evento criado! Copie o link de inscrição no cartão.'); return ''; }
+    catch (err) { if (expired(err)) return ''; return err.message; } finally { setSaving(null); }
   }
-  async function copy(event) { try { await navigator.clipboard.writeText(publicLink(event.publicToken)); setToast('Link copiado.'); } catch { setNotice(`Copie o link: ${publicLink(event.publicToken)}`); } }
+  async function copy(event) { try { await navigator.clipboard.writeText(publicLink(event.publicToken)); setToast('Link copiado.'); } catch { setNotice({ tone: 'info', text: `Copie o link: ${publicLink(event.publicToken)}` }); } }
   async function logout() { await supabase.auth.signOut(); onLogout(); }
-  const filtered = events.filter(event => (page === 'events' || event.saved) && (page !== 'events' || ((source === 'all' || event.source === source) && (mode === 'all' || (mode === 'online' ? event.mode === 'Online' : event.mode !== 'Online')) && event.title.toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR')))));
-  const card = event => <EventCard key={event.id} event={event} onSave={addEvent} onPeople={setSelectedEvent} onRemove={remove} onStatus={updateStatus} onCopy={copy} saving={saving === event.id || event.attendees.some(p => p.id === saving)} />;
-  return <div className="shell"><aside className="sidebar"><Brand /><div><div className="nav-label">MENU PRINCIPAL</div><nav className="nav" aria-label="Navegação principal"><button className={page === 'events' ? 'active' : ''} onClick={() => { setPage('events'); setNotice(''); }}><span className="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 7h16v12H4zM4 10h16M8 4v5M16 4v5M8 14h3m-3 3h5"/></svg></span> Eventos</button><button className={page === 'calendar' ? 'active' : ''} onClick={() => { setPage('calendar'); setNotice(''); }}><span className="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3.5" y="5.5" width="17" height="15" rx="2"/><path d="M7.5 3v5M16.5 3v5M3.5 10h17M8 14h2m4 0h2m-8 3h2m4 0h2"/></svg></span> Agenda da casa</button></nav></div><div className="side-bottom">Conectado como<br />{member.name}<button className="logout" onClick={logout}>Sair →</button></div></aside>
-    <main className="main"><header className="header"><div><div className="tagline">{page === 'events' ? 'Explore e descubra' : 'Nossos compromissos'}</div><h1>{page === 'events' ? 'Eventos para vocês' : 'Agenda da casa'}</h1><p>{page === 'events' ? 'Encontre o próximo evento de tecnologia.' : 'Os eventos que a casa vai, com quem confirmou presença.'}</p></div><div className="header-actions"><button className="secondary" onClick={() => setCreating(true)}>+ Novo evento</button>{page === 'events' && <button className="primary" onClick={refresh} disabled={busy}>{busy ? 'Atualizando…' : '↻ Atualizar eventos'}</button>}</div></header>
-      <div className="toolbar">{page === 'events' && <><label className="sr" htmlFor="search">Buscar eventos</label><input id="search" className="control" placeholder="⌕  Buscar por assunto ou evento" value={search} onChange={e => setSearch(e.target.value)} />{search && <button className="secondary" onClick={() => setSearch('')} aria-label="Limpar busca">×</button>}<label className="sr" htmlFor="source">Plataforma</label><select id="source" className="control" value={source} onChange={e => setSource(e.target.value)}><option value="all">Todas as plataformas</option>{[...new Set(events.map(event => event.source))].sort().map(s => <option key={s}>{s}</option>)}</select><label className="sr" htmlFor="mode">Modalidade</label><select id="mode" className="control" value={mode} onChange={e => setMode(e.target.value)}><option value="all">Todas as modalidades</option><option value="online">Online</option><option value="other">Outras / não informado</option></select></>}<div className="monthnav"><button className="secondary" aria-label="Mês anterior" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}>‹</button><strong>{month.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</strong><button className="secondary" aria-label="Próximo mês" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}>›</button></div></div>
-      {notice && <div className="notice" role="status">{notice}</div>}
-      {loading ? <div className="empty" role="status">Carregando eventos…</div> : loadError ? <div className="empty" role="alert"><strong>Não foi possível carregar os eventos.</strong>{loadError}<br /><button className="secondary" onClick={() => { setLoading(true); load(); }}>Tentar novamente</button></div> : page === 'calendar' ? <Calendar month={month} events={filtered} eventDate={eventDate} renderEvent={card} /> : <><div className="result">{filtered.length} {filtered.length === 1 ? 'evento encontrado' : 'eventos encontrados'}</div><section className="event-list" aria-label="Lista de eventos">{filtered.length ? filtered.map(card) : <div className="empty"><strong>Nenhum evento encontrado</strong>Atualize as fontes, crie um evento ou experimente outro mês ou filtro.</div>}</section></>}
+
+  const card = (event, index) => <EventCard key={event.id} index={index} event={event} onSave={addEvent} onPeople={setSelectedEvent} onRemove={remove} onStatus={updateStatus} onCopy={copy} onPrice={updatePrice} saving={saving === event.id || event.attendees.some(p => p.id === saving)} />;
+  const houseNext = useMemo(() => upcoming.filter(e => e.saved), [upcoming]);
+  const stats = useMemo(() => ({ total: upcoming.length, br: upcoming.filter(isBrazil).length, intl: upcoming.filter(e => !isBrazil(e)).length, house: houseNext.length }), [upcoming, houseNext]);
+  const initials = member.name.split(/\s+/).map(p => p[0]).slice(0, 2).join('').toUpperCase();
+
+  const nav = [['events', 'Explorar', Compass, stats.total], ['calendar', 'Agenda da casa', CalendarHeart, stats.house]];
+  return <div className="shell"><Backdrop />
+    <aside className="sidebar">
+      <Brand />
+      <nav className="nav" aria-label="Navegação principal">
+        <div className="nav-label">Menu</div>
+        {nav.map(([key, label, Icon, n]) => <button key={key} className={page === key ? 'active' : ''} aria-current={page === key ? 'page' : undefined} onClick={() => { setPage(key); setNotice(null); }}>
+          {page === key && <motion.span layoutId="nav-pill" className="nav-pill" transition={{ type: 'spring', stiffness: 420, damping: 34 }} />}
+          <Icon size={19} /><span>{label}</span><em>{n}</em>
+        </button>)}
+      </nav>
+      <div className="user-card"><span className="avatar lg">{initials}</span><div><small>Conectado como</small><strong>{member.name}</strong></div><button className="icon-btn" onClick={logout} aria-label="Sair" title="Sair"><LogOut size={17} /></button></div>
+    </aside>
+
+    <main className="main">
+      <header className="header">
+        <motion.div key={page} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+          <div className="eyebrow">{page === 'events' ? 'Explore e descubra' : 'Nossos compromissos'}</div>
+          <h1>{page === 'events' ? <>Eventos <span className="gradient-text">para vocês</span></> : <>Agenda <span className="gradient-text">da casa</span></>}</h1>
+          <p>{page === 'events' ? 'Só o que ainda vai acontecer, do Brasil e do mundo.' : 'Os eventos que a casa vai, com quem confirmou presença.'}</p>
+        </motion.div>
+        <div className="header-actions">
+          <button className="btn btn-secondary" onClick={() => setCreating(true)}><Plus size={17} />Novo evento</button>
+          {page === 'events' && <button className="btn btn-primary" onClick={refresh} disabled={busy}><RefreshCw size={17} className={busy ? 'spin' : ''} />{busy ? 'Atualizando…' : 'Atualizar eventos'}</button>}
+        </div>
+      </header>
+
+      {page === 'events' && <div className="stats">
+        <Stat icon={<Sparkles size={18} />} label="próximos eventos" value={stats.total} tone="amber" delay={0} />
+        <Stat icon={<span className="flag-br" />} label="no Brasil" value={stats.br} tone="green" delay={.05} />
+        <Stat icon={<Earth size={18} />} label="fora do país" value={stats.intl} tone="blue" delay={.1} />
+        <Stat icon={<CalendarHeart size={18} />} label="na agenda da casa" value={stats.house} tone="rose" delay={.15} />
+      </div>}
+
+      <AnimatePresence>{notice && <motion.div className={`notice notice-${notice.tone}`} role="status" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
+        {notice.items ? <><CircleCheck size={18} /><span className="notice-items">{notice.items.map(s => <span key={s.source} className={s.ok ? '' : 'off'}><b>{s.count}</b> {s.source}{s.message !== 'Dados encontrados' && <small> · {s.message}</small>}</span>)}</span></> : <span>{notice.text}</span>}
+        <button className="icon-btn small" onClick={() => setNotice(null)} aria-label="Fechar aviso"><X size={14} /></button>
+      </motion.div>}</AnimatePresence>
+
+      {loading ? <Skeleton />
+        : loadError ? <div className="empty card-surface" role="alert"><strong>Não foi possível carregar os eventos.</strong><span>{loadError}</span><button className="btn btn-secondary" onClick={() => { setLoading(true); load(); }}>Tentar novamente</button></div>
+        : page === 'events' ? <Explore events={upcoming} card={card} />
+        : <>
+          <div className="toolbar card-surface"><div className="monthnav">
+            <button className="icon-btn" aria-label="Mês anterior" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}><ChevronLeft size={18} /></button>
+            <strong>{month.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</strong>
+            <button className="icon-btn" aria-label="Próximo mês" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}><ChevronRight size={18} /></button>
+          </div><button className="btn btn-ghost" onClick={() => { const d = new Date(); setMonth(new Date(d.getFullYear(), d.getMonth(), 1)); }}>Hoje</button></div>
+          <Calendar month={month} events={agendaMonth} eventDate={eventDate} renderEvent={card} />
+          <section className="month-group"><h2 className="month-title"><span>Próximos da casa</span><em>{houseNext.length}</em></h2>
+            {houseNext.length ? <div className="event-list">{houseNext.map(card)}</div> : <div className="empty card-surface"><CalendarHeart size={28} /><strong>Nenhum evento na agenda ainda</strong><span>Em Explorar, clique em <b>Vamos nesse</b> ou crie um evento.</span></div>}
+          </section>
+        </>}
     </main>
     {selectedEvent && <AttendeesDialog event={selectedEvent} saving={saving === selectedEvent.id} onClose={() => setSelectedEvent(null)} onConfirm={savePeople} />}
     {creating && <EventFormDialog saving={saving === 'new'} onClose={() => setCreating(false)} onCreate={create} />}
-    {toast && <div className="toast-success" role="status"><span aria-hidden="true">✓</span><span>{toast}</span><button type="button" aria-label="Fechar aviso" onClick={() => setToast('')}>×</button></div>}
+    <AnimatePresence>{toast && <motion.div className="toast" role="status" initial={{ opacity: 0, y: 24, scale: .96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16, scale: .96 }}>
+      <CircleCheck size={19} /><span>{toast}</span><button type="button" className="icon-btn small" aria-label="Fechar aviso" onClick={() => setToast('')}><X size={14} /></button>
+    </motion.div>}</AnimatePresence>
   </div>;
 }
 
@@ -108,7 +192,7 @@ function App() {
     });
     return () => data.subscription.unsubscribe();
   }, []);
-  if (state.loading) return <main className="loading">Carregando a agenda…</main>;
+  if (state.loading) return <main className="loading"><span className="logo pulse-logo"><Sparkles size={22} /></span>Carregando a agenda…</main>;
   if (!state.member) return <Login initialError={state.error} />;
   return <Agenda member={state.member} onLogout={() => setState({ loading: false, member: null, error: '' })} onSessionExpired={() => { supabase.auth.signOut(); setState({ loading: false, member: null, error: 'Sua sessão terminou. Entre novamente.' }); }} />;
 }
@@ -120,4 +204,4 @@ function Root() {
   return <App />;
 }
 
-createRoot(document.getElementById('root')).render(<Root />);
+createRoot(document.getElementById('root')).render(<MotionConfig reducedMotion="user"><Root /></MotionConfig>);

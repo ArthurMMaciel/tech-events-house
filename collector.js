@@ -2,7 +2,7 @@
 import * as cheerio from 'cheerio';
 import { collectOpenSources, download } from './src/sources.js';
 
-export { parseBrazil, parseConferences } from './src/sources.js';
+export { parseBrazil, parseConferences, countryCode, toRow } from './src/sources.js';
 
 const pages = {
   Eventbrite: 'https://www.eventbrite.com.br/d/online/free--science-and-tech--events/',
@@ -13,13 +13,13 @@ const allowedHosts = ['www.eventbrite.com', 'www.eventbrite.com.br', 'www.sympla
 function scrape(source, html) {
   const $ = cheerio.load(html); const events = [];
   if (source === 'Eventbrite') $('script[type="application/ld+json"]').each((_, el) => {
-    try { for (const x of JSON.parse($(el).html()).itemListElement || []) { const e = x.item; if (e?.startDate && e.url) events.push({ title: e.name, start: e.startDate, end: e.endDate, url: e.url, mode: 'Online', description: e.description || '' }); } } catch {}
+    try { for (const x of JSON.parse($(el).html()).itemListElement || []) { const e = x.item; if (e?.startDate && e.url) events.push({ title: e.name, start: e.startDate, end: e.endDate, url: e.url, mode: 'Online', online: true, price: 'free', topics: [], description: e.description || '' }); } } catch {}
   });
   if (source === 'Sympla') $('script').each((_, el) => {
     const match = ($(el).html() || '').match(/^self\.__next_f\.push\((\[.*\])\)$/s); if (!match) return;
     try {
       const part = JSON.parse(match[1])[1]; const data = JSON.parse(part.slice(part.indexOf(':') + 1));
-      const walk = o => { if (!o || typeof o !== 'object') return; if (typeof o.name === 'string' && typeof o.start_date === 'string' && typeof o.url === 'string' && o.url.includes('sympla.com.br/evento/')) events.push({ title: o.name, start: o.start_date, end: o.end_date, url: o.url, mode: o.location?.city || 'Não informado', description: '' }); for (const v of Object.values(o)) walk(v); };
+      const walk = o => { if (!o || typeof o !== 'object') return; if (typeof o.name === 'string' && typeof o.start_date === 'string' && typeof o.url === 'string' && o.url.includes('sympla.com.br/evento/')) { const city = typeof o.location?.city === 'string' ? o.location.city : null; const online = !city || /online/i.test(city); events.push({ title: o.name, start: o.start_date, end: o.end_date, url: o.url, mode: online ? 'Online' : 'Presencial', online, countryCode: 'BR', state: /^[A-Za-z]{2}$/.test(o.location?.state || '') ? o.location.state.toUpperCase() : null, city: online ? null : city, topics: [], description: '' }); } for (const v of Object.values(o)) walk(v); };
       walk(data);
     } catch {}
   });

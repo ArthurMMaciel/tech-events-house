@@ -17,32 +17,57 @@ export async function currentMember(userId) {
   return data;
 }
 
-// Eventos do mês, com a marcação de agenda e os participantes.
-export async function loadMonth(month) {
-  const from = isoDate(month), to = isoDate(new Date(month.getFullYear(), month.getMonth() + 1, 1));
+const FIELDS = 'id,title,start_date,end_date,url,source,mode,location,description,country_code,state,city,is_online,price,topics';
+
+function shape(e) {
+  const item = Array.isArray(e.agenda_items) ? e.agenda_items[0] : e.agenda_items;
+  return { id: e.id, title: e.title, start: e.start_date, end: e.end_date, url: e.url, source: e.source, mode: e.mode, location: e.location, description: e.description, countryCode: e.country_code, state: e.state, city: e.city, online: e.is_online, price: e.price, topics: e.topics || [], saved: Boolean(item), publicToken: item?.public_token || null, attendees: (item?.participants || []).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')) };
+}
+
+async function fetchAll(build) {
   const rows = [];
   for (let offset = 0; ; offset += 1000) {
-    const { data, error } = await supabase.from('events')
-      .select('id,title,start_date,end_date,url,source,mode,location,description,agenda_items(public_token,participants(id,name,email,status,origin))')
-      .gte('start_date', from).lt('start_date', to)
-      .order('start_date').order('title').range(offset, offset + 999);
+    const { data, error } = await build().range(offset, offset + 999);
     if (error) fail(error, 'Não foi possível carregar os eventos.');
     rows.push(...data);
     if (data.length < 1000) break;
   }
-  return rows.map(e => {
-    const item = Array.isArray(e.agenda_items) ? e.agenda_items[0] : e.agenda_items;
-    return { id: e.id, title: e.title, start: e.start_date, end: e.end_date, url: e.url, source: e.source, mode: e.mode, location: e.location, description: e.description, saved: Boolean(item), publicToken: item?.public_token || null, attendees: (item?.participants || []).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')) };
-  });
+  return rows.map(shape);
+}
+
+// Catálogo: só o que ainda não terminou (término ou início a partir de hoje).
+export function loadUpcoming() {
+  const today = isoDate(new Date());
+  return fetchAll(() => supabase.from('events')
+    .select(`${FIELDS},agenda_items(public_token,participants(id,name,email,status,origin))`)
+    .or(`end_date.gte.${today},and(end_date.is.null,start_date.gte.${today})`)
+    .order('start_date').order('title'));
+}
+
+// Agenda da casa no mês (inclui dias passados do mês, para o calendário).
+export function loadAgendaMonth(month) {
+  const from = isoDate(month), to = isoDate(new Date(month.getFullYear(), month.getMonth() + 1, 1));
+  return fetchAll(() => supabase.from('events')
+    .select(`${FIELDS},agenda_items!inner(public_token,participants(id,name,email,status,origin))`)
+    .gte('start_date', from).lt('start_date', to)
+    .order('start_date').order('title'));
 }
 
 export async function saveCollected(events) {
   const rows = [...new Map(events.map(toRow).filter(Boolean).map(r => [r.external_id, r])).values()];
-  for (let i = 0; i < rows.length; i += 500) {
-    const { error } = await supabase.from('events').upsert(rows.slice(i, i + 500), { onConflict: 'external_id' });
+  // Lotes com o mesmo conjunto de colunas: linhas sem preço não sobrescrevem o preço salvo.
+  const groups = new Map();
+  for (const r of rows) { const k = Object.keys(r).sort().join(); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
+  for (const group of groups.values()) for (let i = 0; i < group.length; i += 500) {
+    const { error } = await supabase.from('events').upsert(group.slice(i, i + 500), { onConflict: 'external_id' });
     if (error) fail(error, 'Não foi possível salvar os eventos coletados.');
   }
   return rows.length;
+}
+
+export async function setEventPrice(id, price) {
+  const { error } = await supabase.from('events').update({ price: price || null }).eq('id', id);
+  if (error) fail(error, 'Não foi possível atualizar o preço.');
 }
 
 export async function createEvent(input) {

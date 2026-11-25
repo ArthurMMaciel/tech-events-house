@@ -25,18 +25,53 @@ export function parseBrazil(text) {
     if (day < 1 || day > new Date(year, month + 1, 0).getDate()) continue;
     const start = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const url = safeUrl(entry[3]); if (!url) continue;
-    events.push({ id: `Agenda Tech Brasil:${start}:${url.split('?')[0]}`, source: 'Agenda Tech Brasil', title: entry[2], start, end: null, url, mode: /!\[online\]/i.test(entry[4]) ? 'Online' : /!\[híbrido\]/i.test(entry[4]) ? 'Híbrido' : 'Presencial', description: '' });
+    const mode = /!\[online\]/i.test(entry[4]) ? 'Online' : /!\[híbrido\]/i.test(entry[4]) ? 'Híbrido' : 'Presencial';
+    const place = entry[4].match(/_([^_]+)_/)?.[1].trim() || '';
+    const uf = place.match(/\/\s*([A-Za-z]{2})\s*$/)?.[1].toUpperCase() || null;
+    const city = (uf ? place.replace(/\/\s*[A-Za-z]{2}\s*$/, '') : place).trim() || null;
+    events.push({ id: `Agenda Tech Brasil:${start}:${url.split('?')[0]}`, source: 'Agenda Tech Brasil', title: entry[2], start, end: endFromLabel(entry[0], year, month, day), url, mode, countryCode: 'BR', state: uf, city, online: mode === 'Online', topics: [], description: '' });
   }
   return events;
 }
 
-export function parseConferences(data) {
+// Nome do país em inglês (como no Confs.tech) -> código ISO de 2 letras.
+const COUNTRY_ALIASES = { 'u.s.a.': 'US', usa: 'US', 'united states of america': 'US', 'u.k.': 'GB', uk: 'GB', england: 'GB', scotland: 'GB', wales: 'GB', uae: 'AE', 'the netherlands': 'NL', 'czech republic': 'CZ', russia: 'RU', 'south korea': 'KR', korea: 'KR', vietnam: 'VN', turkey: 'TR', 'türkiye': 'TR', taiwan: 'TW', 'hong kong': 'HK', macedonia: 'MK', 'bosnia and herzegovina': 'BA', brasil: 'BR' };
+let countryIndex;
+export function countryCode(name) {
+  const key = String(name || '').trim().toLowerCase();
+  if (!key || /online|virtual|remote/.test(key)) return null;
+  if (COUNTRY_ALIASES[key]) return COUNTRY_ALIASES[key];
+  if (!countryIndex) {
+    countryIndex = new Map(); const names = new Intl.DisplayNames(['en'], { type: 'region', fallback: 'none' });
+    for (let a = 65; a <= 90; a++) for (let b = 65; b <= 90; b++) { const code = String.fromCharCode(a, b); try { const n = names.of(code); if (n) countryIndex.set(n.toLowerCase(), code); } catch {} }
+  }
+  return countryIndex.get(key) || null;
+}
+
+export function parseConferences(data, topic = null) {
   if (!Array.isArray(data)) return [];
   return data.flatMap(e => {
     const url = safeUrl(e.url);
     if (!url || typeof e.name !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(e.startDate || '')) return [];
-    return [{ id: `Confs.tech:${e.startDate}:${url.split('?')[0]}`, source: 'Confs.tech', title: e.name, start: e.startDate, end: e.endDate || null, url, mode: /online|virtual/i.test(`${e.city || ''} ${e.country || ''}`) ? 'Online' : [e.city, e.country].filter(Boolean).join(', ') || 'Não informado', description: '' }];
+    const online = e.online === true || /online|virtual/i.test(`${e.city || ''} ${e.country || ''}`);
+    const rawCity = typeof e.city === 'string' && !/online|virtual/i.test(e.city) ? e.city.trim() : '';
+    const cc = countryCode(e.country);
+    const region = cc === 'US' || cc === 'CA' || cc === 'AU' ? rawCity.match(/,\s*([A-Z]{2,3})$/)?.[1] || null : null;
+    const city = (region ? rawCity.replace(/,\s*[A-Z]{2,3}$/, '') : rawCity) || null;
+    return [{ id: `Confs.tech:${e.startDate}:${url.split('?')[0]}`, source: 'Confs.tech', title: e.name, start: e.startDate, end: e.endDate || null, url, mode: online && city ? 'Híbrido' : online ? 'Online' : 'Presencial', countryCode: cc, state: region, city, online, topics: topic ? [topic] : [], description: '' }];
   });
+}
+
+// "11 e 12", "11 a 13", "30/11 a 02/12": tenta descobrir o último dia.
+function endFromLabel(label, year, month, day) {
+  const days = label.match(/^- ([^:]+):/)?.[1] || '';
+  if (days.includes('/')) return null;
+  const nums = days.match(/\d{1,2}/g)?.map(Number) || [];
+  const last = nums[nums.length - 1];
+  if (!last || last === day || last < 1 || last > 31) return null;
+  const endMonth = last < day ? month + 1 : month;
+  const d = new Date(year, endMonth, last);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 export async function collectBrazil() {
@@ -57,11 +92,13 @@ export async function collectConferences() {
       catch { partial = true; continue; }
       const urls = files.filter(f => f.type === 'file' && /^[a-z0-9-]+\.json$/.test(f.name)).map(f => `https://raw.githubusercontent.com/tech-conferences/conference-data/main/conferences/${y}/${f.name}`);
       for (let i = 0; i < urls.length; i += 8) {
-        const batch = await Promise.allSettled(urls.slice(i, i + 8).map(async url => parseConferences(JSON.parse(await download(url)))));
+        const batch = await Promise.allSettled(urls.slice(i, i + 8).map(async url => parseConferences(JSON.parse(await download(url)), url.match(/\/([a-z0-9-]+)\.json$/)[1])));
         for (const result of batch) if (result.status === 'fulfilled') all.push(...result.value); else partial = true;
       }
     }
-    const events = [...new Map(all.map(e => [e.id, e])).values()];
+    const merged = new Map();
+    for (const e of all) { const seen = merged.get(e.id); if (seen) seen.topics = [...new Set([...seen.topics, ...e.topics])]; else merged.set(e.id, { ...e }); }
+    const events = [...merged.values()];
     return { events, status: { source, count: events.length, ok: events.length > 0, message: partial ? 'Coleta parcial; algumas fontes não responderam' : 'Dados encontrados' } };
   } catch { return { events: [], status: { source, count: 0, ok: false, message: 'Não foi possível consultar esta fonte' } }; }
 }
@@ -77,5 +114,8 @@ export function toRow(e) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !safeUrl(e.url)) return null;
   const endRaw = e.end ? String(e.end).slice(0, 10) : null;
   const end = endRaw && /^\d{4}-\d{2}-\d{2}$/.test(endRaw) && endRaw >= start ? endRaw : null;
-  return { external_id: e.id, title: String(e.title).trim().slice(0, 300) || 'Sem título', start_date: start, end_date: end, url: e.url, source: e.source, mode: e.mode || null, description: e.description || null };
+  const row = { external_id: e.id, title: String(e.title).trim().slice(0, 300) || 'Sem título', start_date: start, end_date: end, url: e.url, source: e.source, mode: e.mode || null, description: e.description || null, country_code: e.countryCode || null, state: e.state || null, city: e.city || null, is_online: Boolean(e.online), topics: e.topics || [] };
+  // Preço só vai quando a fonte informa, para não apagar o que a casa marcou à mão.
+  if (e.price === 'free' || e.price === 'paid') row.price = e.price;
+  return row;
 }
