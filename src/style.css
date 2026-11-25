@@ -76,3 +76,23 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{ou
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important}}
 
 .nav button{display:flex;align-items:center;gap:10px}.nav button .nav-icon{display:inline-flex;width:20px;height:20px;flex:none}.nav-icon svg{width:20px;height:20px;stroke-linecap:round;stroke-linejoin:round}.logout{display:flex;align-items:center;justify-content:center;width:100%;margin-top:16px;padding:12px 16px;border:1px solid #d4484e;border-radius:10px;background:#b52d36;color:#fff;font-weight:700}.logout:hover{background:#d13b44}.event-attendees{display:grid;gap:8px;margin-top:16px}.person-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.person-row>span:first-child{flex:1;min-width:150px;color:var(--ink)}.person-email{color:var(--muted);overflow-wrap:anywhere}.person-row small{display:block;color:var(--muted);margin-top:3px}.status-select{height:36px;font-size:12px}.send-invite{font-size:12px;padding:8px}.side-bottom .logout{padding:12px 16px;color:#fff}.attendees-dialog .control{width:100%}@media(max-width:800px){.side-bottom .logout{display:inline-flex;width:auto;margin:8px 0 0 12px}}
+
+/* Agenda compartilhada: criação de evento, link público e página de inscrição */
+textarea.control{height:auto;min-height:84px;padding-top:10px;resize:vertical;font:inherit}
+.header-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.form-row .field{margin:0}
+.event-share{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px;padding:10px 12px;border:1px dashed #F4972540;border-radius:10px;background:#F497250a;font-size:12px}
+.event-share code{color:#FCD29C;overflow-wrap:anywhere;font-size:12px}
+.share-label{color:var(--muted);font-weight:700}
+.event-share .ghost{padding:4px 10px;font-size:12px}
+.ghost-link{color:#F8B762;font-size:12px;font-weight:700;text-decoration:none}.ghost-link:hover{text-decoration:underline}
+.public-page{min-height:100vh;background:var(--page);display:grid;place-items:center;padding:32px 16px}
+.public-card{width:min(560px,100%);background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:32px;color:var(--ink);line-height:1.5}
+.public-card h1{font-size:clamp(26px,5vw,34px);line-height:1.15;margin:8px 0 12px}
+.public-card .brand{margin-bottom:28px}
+.public-meta{display:flex;flex-direction:column;gap:4px;color:var(--muted);margin-bottom:12px;text-transform:capitalize}
+.public-description{white-space:pre-line}
+.public-card a{color:#F8B762}
+.public-card form{margin-top:22px}
+.public-actions{display:flex;gap:10px;flex-wrap:wrap}
+@media(max-width:480px){.form-row{grid-template-columns:1fr}.public-card{padding:22px}.header-actions{width:100%}}

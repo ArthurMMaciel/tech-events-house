@@ -1,33 +1,55 @@
 # DFL Events
 
-Primeira versão local para descobrir eventos e acompanhar os que você marcou como inscrito.
+Agenda compartilhada de eventos de tecnologia. É um frontend React/Vite publicado na Vercel que fala direto com o Supabase (Auth + Postgres com RLS). Não há backend próprio.
 
-## Executar
+## Como funciona
 
-É necessário Node.js 22.13 ou superior e `curl` disponível no PATH. No terminal:
+- **Login**: contas do Supabase Auth criadas por você. Não existe cadastro público.
+- **Eventos**: catálogo do mês, preenchido pelo botão **Atualizar eventos** (Agenda Tech Brasil e Confs.tech, direto do navegador) ou por **+ Novo evento**.
+- **Agenda da casa**: o que vocês marcaram com **Vamos nesse** ou criaram à mão. Todos os membros enxergam e editam a mesma agenda.
+- **Link de inscrição**: cada evento da agenda ganha um link `/e/<token>`. Quem abre o link informa nome e e-mail e confirma presença ou recusa, sem login.
+- **Convite por e-mail**: o botão abre o seu programa de e-mail com o link de inscrição já no texto. O envio sai do seu e-mail. Quando a pessoa responde pelo link, o status dela muda na lista.
+
+## Configurar o Supabase (uma vez)
+
+1. No SQL Editor do projeto, execute [`supabase/001_schema.sql`](supabase/001_schema.sql).
+2. Em **Authentication → Users → Add user**, crie a conta de cada sócio.
+3. Libere o acesso de cada conta à agenda:
+   ```sql
+   insert into public.members (user_id, name)
+   select id, 'Nome' from auth.users where email = 'email@exemplo.com';
+   ```
+4. Recomendado: desligue **Allow new users to sign up** em Authentication → Sign In / Providers → Email. Mesmo ligado, contas fora de `members` não acessam nada.
+
+## Configurar a Vercel
+
+Em Project Settings → Environment Variables, defina:
+
+- `VITE_SUPABASE_URL`: URL do projeto
+- `VITE_SUPABASE_PUBLISHABLE_KEY`: chave publicável (`sb_publishable_...`)
+
+Faça um novo deploy. Essas variáveis vão para o navegador. Nunca use a chave `service_role`/secret nem a senha do banco com prefixo `VITE_`.
+
+## Desenvolver
 
 ```powershell
 npm install
-npm run user
-npm run build
-npm start
+npm run dev
 ```
 
-O comando de criação pede e-mail e senha e grava somente o hash da senha no banco SQLite local `agenda.sqlite`. Atenção: por enquanto a senha digitada aparece no terminal. Acesse http://localhost:3000 e faça login. Não existe cadastro público.
+O `.env` local precisa das mesmas variáveis `VITE_` (veja `.env.example`).
 
-O frontend usa React e Vite. Para desenvolver com atualização automática, inicie o backend com `npm start` em um terminal e, em outro, execute `npm run dev`. Acesse o endereço informado pelo Vite (normalmente http://127.0.0.1:5173); as chamadas `/api` são encaminhadas ao backend na porta 3000. Para usar apenas `npm start`, execute `npm run build` após alterar o frontend: o Express serve os arquivos gerados em `dist`.
+## Coleta completa (Eventbrite e Sympla)
 
-Na página Eventos, clique em **Atualizar eventos**. É necessária conexão com a internet. Os resultados de cada fonte são exibidos após a coleta; a Even3 ainda não tem extrator implementado e será reportada como indisponível. Os eventos são guardados localmente. A coleta é manual nesta versão, não há agendamento nem integração com Telegram.
+Eventbrite e Sympla bloqueiam requisições do navegador (CORS), por isso rodam em um script local que entra com uma conta de membro:
 
-Clique em **Ver evento** para abrir o site e realizar a inscrição. Depois, **Marcar inscrito** adiciona o evento à tela Calendário; o aplicativo não faz inscrições por você. A lista é filtrada pelo mês selecionado e não garante que todos os eventos publicados nas plataformas foram encontrados.
+```powershell
+npm run collect
+```
 
-Este projeto é para execução local, ouvindo apenas em `127.0.0.1`. Antes de expor na internet é necessário planejar hospedagem, HTTPS, proteção adicional de login, cópias de segurança e revisar as condições de uso das fontes de dados.
+O script exige `COLLECT_EMAIL` e `COLLECT_PASSWORD` no `.env`. A Even3 ainda não tem extrator.
 
+## Limites conhecidos
 
-## Fontes adicionais
-
-A atualização consulta a [Agenda Tech Brasil](https://github.com/agenda-tech-brasil/agenda-tech-brasil) e os dados abertos do [Confs.tech](https://github.com/tech-conferences/conference-data), além das fontes existentes. O catálogo inclui eventos internacionais. Confira sempre datas, inscrições e disponibilidade no site do organizador. A Agenda Tech Brasil informa os dias de cada evento; a coleta usa o primeiro dia. A disponibilidade de cada fonte aparece no resultado da atualização. O extrator Even3 ainda não está implementado.
-
-## Convites por Gmail
-
-O aplicativo registra respostas como aguardando, confirmou ou não vai; elas também podem ser alteradas manualmente. O envio de convites está preparado, mas só funciona após configurar no ambiente do servidor `GMAIL_USER` (endereço Gmail), `GMAIL_APP_PASSWORD` (senha de aplicativo Google) e `PUBLIC_URL` (URL pública do aplicativo). Nunca coloque a senha no repositório. Reinicie o servidor após a configuração. Novos participantes recebem um convite ao salvar; convites com falha ou ainda não enviados podem ser enviados pelo botão no cartão. O link permite responder, mas não faz inscrição na plataforma do evento. A publicação em rede requer planejamento de hospedagem e segurança descrito acima.
+- O link público aceita até 1000 respostas por evento e não tem proteção contra robôs. Se virar problema, dá para ativar CAPTCHA no Supabase ou trocar o token do evento.
+- Confira sempre datas e inscrições no site do organizador. Confirmar presença aqui não faz a inscrição oficial no evento.
