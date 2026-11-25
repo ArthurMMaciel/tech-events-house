@@ -103,8 +103,42 @@ export async function collectConferences() {
   } catch { return { events: [], status: { source, count: 0, ok: false, message: 'Não foi possível consultar esta fonte' } }; }
 }
 
+// Even3: a página da categoria "Computação e TI" (id 4) publica este JSON com CORS aberto.
+const EVEN3_URL = 'https://even3v2.blob.core.windows.net/json/lista_de_eventos-categoria-4.json';
+
+export function parseEven3(data) {
+  const raw = [...(data?.listaEventosPorCategoriaPaginados || []), ...(data?.listaModelTagCategoriaEvento || []).flatMap(t => (t.listaEventos || []).map(e => ({ ...e, tag: t.descricao })))];
+  const out = new Map();
+  for (const e of raw) {
+    const url = safeUrl(e.url); const start = String(e.data || e.dataEvento || '').slice(0, 10);
+    if (!url || typeof e.titulo !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(start) || e.passou) continue;
+    const id = `Even3:${e.id}`;
+    if (out.has(id)) { const seen = out.get(id); if (e.tag && !seen.topics.includes(e.tag)) seen.topics.push(e.tag); continue; }
+    const online = e.eventoOnline === true || /evento online|on-?line/i.test(e.localRealizacao || '');
+    const foreign = e.pais && !/bra[sz]il/i.test(e.pais);
+    const priceMax = Number(e.precoIngressoMaisCaro);
+    out.set(id, {
+      id, source: 'Even3', title: e.titulo.trim(), start, end: String(e.dataFim || e.dataFimEvento || '').slice(0, 10) || null, url,
+      mode: online ? 'Online' : 'Presencial', online, countryCode: foreign ? countryCode(e.pais) : 'BR',
+      state: /^[A-Z]{2}$/.test(e.siglaEstado || '') ? e.siglaEstado : null, city: e.cidade || null,
+      // 0/0 não diferencia gratuito de preço não cadastrado: só marca pago quando há valor.
+      price: priceMax > 0 ? 'paid' : undefined,
+      topics: e.tag ? [e.tag] : [], description: e.resumoEvento || '',
+    });
+  }
+  return [...out.values()];
+}
+
+export async function collectEven3() {
+  const source = 'Even3';
+  try {
+    const events = parseEven3(JSON.parse((await download(EVEN3_URL)).replace(/^﻿/, '')));
+    return { events, status: { source, count: events.length, ok: events.length > 0, message: events.length ? 'Dados encontrados' : 'Nenhum evento identificado' } };
+  } catch { return { events: [], status: { source, count: 0, ok: false, message: 'Não foi possível consultar esta fonte' } }; }
+}
+
 export async function collectOpenSources() {
-  const results = await Promise.all([collectBrazil(), collectConferences()]);
+  const results = await Promise.all([collectBrazil(), collectConferences(), collectEven3()]);
   return { events: results.flatMap(r => r.events), status: results.map(r => r.status) };
 }
 

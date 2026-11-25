@@ -30,3 +30,18 @@ test('não envia preço quando a fonte não informa', () => {
   assert.equal('price' in toRow(base), false);
   assert.equal(toRow({ ...base, price: 'free' }).price, 'free');
 });
+
+test('lê eventos da Even3 com cidade, estado e preço', async () => {
+  const { parseEven3 } = await import('./src/sources.js');
+  const events = parseEven3({
+    listaEventosPorCategoriaPaginados: [
+      { id: 1, data: '2026-12-12T00:00:00', dataFim: '2026-12-13T00:00:00', titulo: 'DevOpsDays Recife', url: 'https://even3.com.br/devopsdays-1', cidade: 'Recife', siglaEstado: 'PE', pais: 'Brasil', precoIngressoMaisCaro: 0, passou: false },
+      { id: 2, data: '2026-12-14T00:00:00', titulo: 'Agentes de IA', url: 'https://even3.com.br/agentes-2', localRealizacao: 'Este é um evento online', pais: 'Brasil', precoIngressoMaisCaro: 178.9 },
+      { id: 3, data: '2020-01-01T00:00:00', titulo: 'Antigo', url: 'https://even3.com.br/x-3', passou: true },
+    ],
+    listaModelTagCategoriaEvento: [{ descricao: 'inteligência artificial', listaEventos: [{ id: 2, data: '2026-12-14T00:00:00', titulo: 'Agentes de IA', url: 'https://even3.com.br/agentes-2' }] }],
+  });
+  assert.equal(events.length, 2);
+  assert.deepEqual([events[0].city, events[0].state, events[0].countryCode, events[0].end, events[0].price], ['Recife', 'PE', 'BR', '2026-12-13', undefined]);
+  assert.deepEqual([events[1].mode, events[1].price, events[1].topics], ['Online', 'paid', ['inteligência artificial']]);
+});

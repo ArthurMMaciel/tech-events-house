@@ -84,7 +84,12 @@ function Agenda({ member, onLogout, onSessionExpired }) {
 
   async function refresh() {
     setBusy(true); setNotice({ tone: 'info', text: 'Consultando as fontes. Isso leva alguns segundos…' });
-    try { const { events: found, status } = await collectOpenSources(); await saveCollected(found); await load(); setNotice({ tone: 'ok', items: status }); }
+    try {
+      const { events: found, status } = await collectOpenSources(); await saveCollected(found); await load();
+      const today = new Date().toLocaleDateString('sv-SE');
+      const ahead = src => found.filter(e => e.source === src && String(e.end || e.start).slice(0, 10) >= today).length;
+      setNotice({ tone: 'ok', items: status.map(s => ({ ...s, upcoming: ahead(s.source) })) });
+    }
     catch (err) { if (!expired(err)) setNotice({ tone: 'error', text: err.message }); } finally { setBusy(false); }
   }
   async function run(id, action, message) {
@@ -146,7 +151,7 @@ function Agenda({ member, onLogout, onSessionExpired }) {
       </div>}
 
       <AnimatePresence>{notice && <motion.div className={`notice notice-${notice.tone}`} role="status" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
-        {notice.items ? <><CircleCheck size={18} /><span className="notice-items">{notice.items.map(s => <span key={s.source} className={s.ok ? '' : 'off'}><b>{s.count}</b> {s.source}{s.message !== 'Dados encontrados' && <small> · {s.message}</small>}</span>)}</span></> : <span>{notice.text}</span>}
+        {notice.items ? <><CircleCheck size={18} /><span className="notice-items">{notice.items.map(s => <span key={s.source} className={s.ok ? '' : 'off'}>{s.source}: <b>{s.upcoming}</b> próximos <small>de {s.count} na fonte{s.message !== 'Dados encontrados' && ` · ${s.message}`}</small></span>)}</span></> : <span>{notice.text}</span>}
         <button className="icon-btn small" onClick={() => setNotice(null)} aria-label="Fechar aviso"><X size={14} /></button>
       </motion.div>}</AnimatePresence>
 
